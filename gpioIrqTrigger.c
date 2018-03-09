@@ -11,8 +11,7 @@
  ****************************************************************/
 
 #define SYSFS_GPIO_DIR "/sys/class/gpio"
-// TODO: let's increase this time-out, try experimenting
-#define POLL_TIMEOUT (3 * 1000) /* 3 seconds */
+#define POLL_TIMEOUT (5 * 1000) 
 #define MAX_BUF 64
 
 /****************************************************************
@@ -191,7 +190,6 @@ int gpio_fd_close(int fd)
  ****************************************************************/
 
 void printUsage() {
-	// Pavel: this defines how the program should operate, you will need to modify it to behave this way :)
 	printf("Usage: gpioIrqTrigger <gpio> <edge> <action>\n\n");
 	printf("Program continuously waits for an edge on the specified GPIO to execute a user-specified action.\n\n");
 	printf("Arguments:\n");
@@ -210,23 +208,29 @@ int main(int argc, char **argv, char **envp)
 	int nfds = 2;
 	int gpio_fd, timeout, rc;
 	char *buf[MAX_BUF];
+	char edge[MAX_BUF];
+	char action[MAX_BUF];
 	unsigned int gpio;
 	int len;
 	int val;
 
-	// TODO: this will need to be updated to accept more arguments, see printUsage() function
-	if (argc < 2) {
+	if (argc < 4) {
 		printUsage();
 		exit(-1);
 	}
 
-	// TODO: parse the additional arguments
-	//	we need to sanitize the <edge> argument to make sure it's one of the allowed triggers, the program should exit
 	gpio = atoi(argv[1]);
-
+	strcpy(edge, argv[2]);
+	strcpy(action, argv[3]);
+	if ((strcmp(edge, "rising")) != 0 && (strcmp(edge, "falling")) != 0 && (strcmp(edge, "both")) != 0){	
+		printUsage();
+		exit(-1);
+	}
+	
+	//setup the gpio for edge detection
 	gpio_export(gpio);
 	gpio_set_dir(gpio, 0);
-	gpio_set_edge(gpio, "both");
+	gpio_set_edge(gpio, edge); 
 	gpio_fd = gpio_fd_open(gpio);
 
 	timeout = POLL_TIMEOUT;
@@ -236,39 +240,41 @@ int main(int argc, char **argv, char **envp)
 
 		fdset[0].fd = STDIN_FILENO;
 		fdset[0].events = POLLIN;
-
 		fdset[1].fd = gpio_fd;
 		fdset[1].events = POLLPRI;
-
+	
 		rc = poll(fdset, nfds, timeout);
-
+	
 		if (rc < 0) {
 			printf("\npoll() failed!\n");
 			return -1;
 		}
-
-		// TODO: we don't want any output if the poll call timed out!
-		if (rc == 0) {
-			printf(".");
-		}
-
+	
 		if (fdset[1].revents & POLLPRI) {
 			lseek(fdset[1].fd, 0, SEEK_SET);
-			len = read(fdset[1].fd, buf, MAX_BUF);
-			// TODO: this is what executes if an edge is detected
-			//	have a system call that runs the <action> argument
-			printf("\npoll() GPIO %d interrupt occurred\n", gpio);
-			printf("\tread value: '%c'\n", buf[0]);
+			len = read(fdset[1].fd, buf, MAX_BUF);			
+			printf("GPIO Status is %s", buf);
+			if (strcmp(edge, "rising") == 0) {
+				if(strncmp(buf, "1", 1) == 0){
+					system(action);
+				}
+			}
+			if (strcmp(edge, "falling") == 0) {
+				if(strncmp(buf, "0", 1) == 0){
+					system(action);
+                }
+			}
+			if (strcmp(edge, "both") == 0) {
+				system(action);
+			}
 		}
 
 		if (fdset[0].revents & POLLIN) {
 			(void)read(fdset[0].fd, buf, 1);
-			printf("\npoll() stdin read 0x%2.2X\n", (unsigned int) buf[0]);
 		}
 
-		fflush(stdout);
-	}
-
+	fflush(stdout);
+	}	
 	gpio_fd_close(gpio_fd);
 	return 0;
 }
